@@ -13,17 +13,19 @@ DATABASE_URL = settings.DATABASE_URL
 
 
 # =========================================================
+# VALIDATE DATABASE URL
+# =========================================================
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not configured."
+    )
+
+
+# =========================================================
 # NORMALIZE POSTGRES URL
 # =========================================================
 
-# Some PostgreSQL providers return:
-#
-# postgres://...
-#
-# SQLAlchemy expects:
-#
-# postgresql://...
-#
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgres://",
