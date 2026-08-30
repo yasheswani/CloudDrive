@@ -5,8 +5,24 @@ from app.core.security import hash_password,verify_password,token,current_user
 from app.models.models import User
 from app.schemas.schemas import Register,Login
 router=APIRouter(prefix='/auth',tags=['auth'])
-def set_tokens(response,user):
-    response.set_cookie('access_token',token(str(user.id),minutes=30),httponly=True,samesite='lax'); response.set_cookie('refresh_token',token(str(user.id),days=14),httponly=True,samesite='lax')
+def set_tokens(response, user):
+    response.set_cookie(
+        key="access_token",
+        value=token(str(user.id), minutes=30),
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+    )
+
+    response.set_cookie(
+        key="refresh_token",
+        value=token(str(user.id), days=14),
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+    )
 @router.post('/register')
 def register(data:Register,response:Response,db:Session=Depends(get_db)):
     if db.query(User).filter_by(email=data.email.lower()).first(): raise HTTPException(409,'Email already registered')
