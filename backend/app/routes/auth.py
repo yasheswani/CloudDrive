@@ -1,19 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Response, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-
 from app.core.security import (
     hash_password,
     verify_password,
     token,
     current_user,
+    cookie_options,
 )
 
 from app.models.models import User
-
 from app.schemas.schemas import Register, Login
 
+
+# =========================================================
+# ROUTER
+# =========================================================
 
 router = APIRouter(
     prefix="/auth",
@@ -25,59 +28,35 @@ router = APIRouter(
 # SET AUTHENTICATION COOKIES
 # =========================================================
 
-def set_tokens(
-    response: Response,
-    user: User,
-):
+def set_tokens(response: Response, user: User) -> None:
     """
-    Store JWT access and refresh tokens
-    in secure HttpOnly cookies.
+    Create access and refresh cookies for the user.
+    """
 
-    secure=True and samesite="none" are required
-    because frontend and backend are deployed
-    separately on Vercel.
-    """
+    options = cookie_options()
+
+    access_token = token(
+        str(user.id),
+        minutes=30,
+    )
+
+    refresh_token = token(
+        str(user.id),
+        days=14,
+    )
 
     response.set_cookie(
         key="access_token",
-        value=token(
-            str(user.id),
-            minutes=30,
-        ),
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
+        value=access_token,
+        max_age=30 * 60,
+        **options,
     )
 
     response.set_cookie(
         key="refresh_token",
-        value=token(
-            str(user.id),
-            days=14,
-        ),
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-    )
-
-
-# =========================================================
-# CLEAR AUTHENTICATION COOKIES
-# =========================================================
-
-def clear_tokens(
-    response: Response,
-):
-    response.delete_cookie(
-        key="access_token",
-        path="/",
-    )
-
-    response.delete_cookie(
-        key="refresh_token",
-        path="/",
+        value=refresh_token,
+        max_age=14 * 24 * 60 * 60,
+        **options,
     )
 
 
@@ -93,7 +72,6 @@ def register(
 ):
     email = data.email.strip().lower()
 
-    # Check existing user
     existing_user = (
         db.query(User)
         .filter_by(email=email)
@@ -106,24 +84,17 @@ def register(
             detail="Email already registered",
         )
 
-    # Create user
     user = User(
         email=email,
         name=data.name.strip(),
-        password_hash=hash_password(
-            data.password
-        ),
+        password_hash=hash_password(data.password),
     )
 
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Login immediately
-    set_tokens(
-        response,
-        user,
-    )
+    set_tokens(response, user)
 
     return {
         "id": user.id,
@@ -150,31 +121,20 @@ def login(
         .first()
     )
 
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password",
+    if (
+        not user
+        or not user.password_hash
+        or not verify_password(
+            data.password,
+            user.password_hash,
         )
-
-    if not user.password_hash:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password",
-        )
-
-    if not verify_password(
-        data.password,
-        user.password_hash,
     ):
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password",
         )
 
-    set_tokens(
-        response,
-        user,
-    )
+    set_tokens(response, user)
 
     return {
         "id": user.id,
@@ -188,13 +148,26 @@ def login(
 # =========================================================
 
 @router.post("/logout")
-def logout(
-    response: Response,
-):
-    clear_tokens(response)
+def logout(response: Response):
+    """
+    Completely remove the authentication cookies.
+    """
+
+    options = cookie_options()
+
+    response.delete_cookie(
+        key="access_token",
+        path=options["path"],
+    )
+
+    response.delete_cookie(
+        key="refresh_token",
+        path=options["path"],
+    )
 
     return {
         "ok": True,
+        "message": "Logged out successfully",
     }
 
 
