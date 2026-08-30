@@ -5,11 +5,25 @@ from sqlalchemy.pool import NullPool
 from .config import settings
 
 
+# =========================================================
+# DATABASE URL
+# =========================================================
+
 DATABASE_URL = settings.DATABASE_URL
 
 
-# Supabase may provide postgres://
-# SQLAlchemy expects postgresql://
+# =========================================================
+# NORMALIZE POSTGRES URL
+# =========================================================
+
+# Some PostgreSQL providers return:
+#
+# postgres://...
+#
+# SQLAlchemy expects:
+#
+# postgresql://...
+#
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgres://",
@@ -18,24 +32,29 @@ if DATABASE_URL.startswith("postgres://"):
     )
 
 
-# ---------------------------------------------------------
-# Database engine
-# ---------------------------------------------------------
+# =========================================================
+# DATABASE ENGINE
+# =========================================================
 
 if DATABASE_URL.startswith("sqlite"):
-    # Local development
-    connect_args = {
-        "check_same_thread": False
-    }
+
+    # -----------------------------------------------------
+    # LOCAL DEVELOPMENT
+    # -----------------------------------------------------
 
     engine = create_engine(
         DATABASE_URL,
-        connect_args=connect_args,
+        connect_args={
+            "check_same_thread": False,
+        },
     )
 
 else:
-    # Supabase PostgreSQL / Vercel
-    # NullPool is recommended for serverless deployments.
+
+    # -----------------------------------------------------
+    # SUPABASE POSTGRESQL / VERCEL
+    # -----------------------------------------------------
+
     engine = create_engine(
         DATABASE_URL,
         poolclass=NullPool,
@@ -43,9 +62,9 @@ else:
     )
 
 
-# ---------------------------------------------------------
-# Session
-# ---------------------------------------------------------
+# =========================================================
+# DATABASE SESSION
+# =========================================================
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -54,16 +73,16 @@ SessionLocal = sessionmaker(
 )
 
 
-# ---------------------------------------------------------
-# Base model
-# ---------------------------------------------------------
+# =========================================================
+# BASE MODEL
+# =========================================================
 
 Base = declarative_base()
 
 
-# ---------------------------------------------------------
-# Database dependency
-# ---------------------------------------------------------
+# =========================================================
+# DATABASE DEPENDENCY
+# =========================================================
 
 def get_db():
     db = SessionLocal()
