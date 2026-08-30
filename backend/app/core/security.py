@@ -1,18 +1,14 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from jose import jwt, JWTError
-
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
 
 from fastapi import Depends, HTTPException, Request
-
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_db
-
 from app.models.models import User
 
 
@@ -24,30 +20,19 @@ ph = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    """Hash a plain-text password using Argon2."""
-
-    if not password:
-        raise ValueError("Password cannot be empty")
-
+    """
+    Hash a plain-text password using Argon2.
+    """
     return ph.hash(password)
 
 
-def verify_password(
-    password: str,
-    password_hash: str,
-) -> bool:
-    """Verify a password against an Argon2 password hash."""
-
+def verify_password(password: str, password_hash: str) -> bool:
+    """
+    Verify a plain-text password against an Argon2 hash.
+    """
     try:
-        return ph.verify(
-            password_hash,
-            password,
-        )
-
-    except (
-        VerifyMismatchError,
-        VerificationError,
-    ):
+        return ph.verify(password_hash, password)
+    except (VerifyMismatchError, VerificationError):
         return False
 
 
@@ -63,22 +48,18 @@ def token(
     days: int = 0,
     minutes: int = 0,
 ) -> str:
-    """Create a JWT token."""
+    """
+    Create a JWT containing the user's ID.
+    """
 
-    if not subject:
-        raise ValueError("Token subject cannot be empty")
-
-    expiration = (
-        datetime.now(timezone.utc)
-        + timedelta(
-            days=days,
-            minutes=minutes,
-        )
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        days=days,
+        minutes=minutes,
     )
 
     payload = {
         "sub": str(subject),
-        "exp": expiration,
+        "exp": expires_at,
     }
 
     return jwt.encode(
@@ -89,18 +70,55 @@ def token(
 
 
 # =========================================================
+# COOKIE CONFIGURATION
+# =========================================================
+
+def cookie_options() -> dict:
+    """
+    Cookie settings that work for the deployed frontend
+    and backend.
+
+    Production:
+        HTTPS + SameSite=None
+
+    Local development:
+        HTTP + SameSite=lax
+    """
+
+    is_production = (
+        settings.FRONTEND_ORIGIN.startswith("https://")
+    )
+
+    if is_production:
+        return {
+            "httponly": True,
+            "secure": True,
+            "samesite": "none",
+            "path": "/",
+        }
+
+    return {
+        "httponly": True,
+        "secure": False,
+        "samesite": "lax",
+        "path": "/",
+    }
+
+
+# =========================================================
 # CURRENT USER
 # =========================================================
 
 def current_user(
     request: Request,
     db: Session = Depends(get_db),
-) -> User:
-    """Return the authenticated user from the access token."""
+):
+    """
+    Get the currently authenticated user from the
+    access_token HttpOnly cookie.
+    """
 
-    raw_token: Optional[str] = request.cookies.get(
-        "access_token"
-    )
+    raw_token = request.cookies.get("access_token")
 
     if not raw_token:
         raise HTTPException(
@@ -131,17 +149,13 @@ def current_user(
 
     try:
         user_id = int(subject)
-
     except (TypeError, ValueError):
         raise HTTPException(
             status_code=401,
             detail="Invalid session",
         )
 
-    user = db.get(
-        User,
-        user_id,
-    )
+    user = db.get(User, user_id)
 
     if not user:
         raise HTTPException(
