@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, Response, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+
 from app.core.security import (
     hash_password,
     verify_password,
     token,
     current_user,
 )
+
 from app.models.models import User
+
 from app.schemas.schemas import Register, Login
 
 
@@ -19,15 +22,20 @@ router = APIRouter(
 
 
 # =========================================================
-# COOKIE / TOKEN HELPERS
+# SET AUTHENTICATION COOKIES
 # =========================================================
 
-def set_tokens(response: Response, user: User):
+def set_tokens(
+    response: Response,
+    user: User,
+):
     """
-    Set authentication tokens in secure HttpOnly cookies.
+    Store JWT access and refresh tokens
+    in secure HttpOnly cookies.
 
-    This configuration is required because the frontend
-    and backend are deployed on separate Vercel domains.
+    secure=True and samesite="none" are required
+    because frontend and backend are deployed
+    separately on Vercel.
     """
 
     response.set_cookie(
@@ -55,25 +63,21 @@ def set_tokens(response: Response, user: User):
     )
 
 
-def clear_tokens(response: Response):
-    """
-    Remove authentication cookies.
-    """
+# =========================================================
+# CLEAR AUTHENTICATION COOKIES
+# =========================================================
 
+def clear_tokens(
+    response: Response,
+):
     response.delete_cookie(
         key="access_token",
         path="/",
-        secure=True,
-        httponly=True,
-        samesite="none",
     )
 
     response.delete_cookie(
         key="refresh_token",
         path="/",
-        secure=True,
-        httponly=True,
-        samesite="none",
     )
 
 
@@ -87,13 +91,9 @@ def register(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    """
-    Create a new user account.
-    """
-
     email = data.email.strip().lower()
 
-    # Check if email already exists
+    # Check existing user
     existing_user = (
         db.query(User)
         .filter_by(email=email)
@@ -110,15 +110,20 @@ def register(
     user = User(
         email=email,
         name=data.name.strip(),
-        password_hash=hash_password(data.password),
+        password_hash=hash_password(
+            data.password
+        ),
     )
 
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Login immediately after registration
-    set_tokens(response, user)
+    # Login immediately
+    set_tokens(
+        response,
+        user,
+    )
 
     return {
         "id": user.id,
@@ -137,10 +142,6 @@ def login(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    """
-    Authenticate an existing user.
-    """
-
     email = data.email.strip().lower()
 
     user = (
@@ -149,20 +150,31 @@ def login(
         .first()
     )
 
-    if (
-        not user
-        or not user.password_hash
-        or not verify_password(
-            data.password,
-            user.password_hash,
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password",
         )
+
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password",
+        )
+
+    if not verify_password(
+        data.password,
+        user.password_hash,
     ):
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password",
         )
 
-    set_tokens(response, user)
+    set_tokens(
+        response,
+        user,
+    )
 
     return {
         "id": user.id,
@@ -176,11 +188,9 @@ def login(
 # =========================================================
 
 @router.post("/logout")
-def logout(response: Response):
-    """
-    Clear authentication cookies.
-    """
-
+def logout(
+    response: Response,
+):
     clear_tokens(response)
 
     return {
@@ -196,10 +206,6 @@ def logout(response: Response):
 def me(
     user: User = Depends(current_user),
 ):
-    """
-    Return the currently authenticated user.
-    """
-
     return {
         "id": user.id,
         "email": user.email,
