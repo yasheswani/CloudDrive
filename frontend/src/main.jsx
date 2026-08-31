@@ -383,6 +383,31 @@ function App() {
   }
 
   /* ====================================================
+       DOWNLOAD FILE
+    ==================================================== */
+
+  async function downloadFile(file) {
+    try {
+      setToast(`Downloading ${file.name}...`);
+      const response = await api.get(`/files/${file.id}/download`, {
+        responseType: "blob",
+      });
+
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", file.name);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      setToast("");
+    } catch (error) {
+      setToast(error.response?.data?.detail || "Download failed");
+    }
+  }
+
+  /* ====================================================
        GENERIC ACTION
     ==================================================== */
 
@@ -468,8 +493,17 @@ function App() {
   }
 
   /* ====================================================
-       AUTHENTICATED APPLICATION
-    ==================================================== */
+     BREADCRUMBS CALCULATION
+  ==================================================== */
+
+  const breadcrumbs = [];
+  let currId = folder;
+  while (currId) {
+    const f = folders.find((x) => x.id === currId);
+    if (!f) break;
+    breadcrumbs.unshift(f);
+    currId = f.parent_id;
+  }
 
   return (
     <div className="app">
@@ -573,26 +607,45 @@ function App() {
         <section className="content">
           <div className="title-row">
             <div>
-              <div
-                className="crumb"
-                onClick={() => {
-                  setView("drive");
-                  setFolder(null);
-                }}
-              >
-                My Drive
-                {folder && (
-                  <>
-                    <ChevronRight size={15} />
+              <div className="crumb">
+                <span
+                  onClick={() => {
+                    setView("drive");
+                    setFolder(null);
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  My Drive
+                </span>
 
-                    {folders.find((x) => x.id === folder)?.name}
-                  </>
-                )}
+                {breadcrumbs.map((b, idx) => (
+                  <React.Fragment key={b.id}>
+                    <ChevronRight size={15} />
+                    <span
+                      onClick={() => {
+                        setView("drive");
+                        setFolder(b.id);
+                      }}
+                      style={{
+                        cursor: "pointer",
+                        fontWeight: idx === breadcrumbs.length - 1 ? 600 : 400,
+                        color:
+                          idx === breadcrumbs.length - 1
+                            ? "#172033"
+                            : "inherit",
+                      }}
+                    >
+                      {b.name}
+                    </span>
+                  </React.Fragment>
+                ))}
               </div>
 
               <h2>
                 {view === "drive"
-                  ? "Files"
+                  ? folder
+                    ? breadcrumbs[breadcrumbs.length - 1]?.name || "Folder"
+                    : "Files"
                   : view === "shared"
                     ? "Shared with me"
                     : view === "starred"
@@ -625,23 +678,62 @@ function App() {
             </span>
           </div>
 
-          {folder === null && view === "drive" && (
-            <div className="folders">
-              {folders
-                .filter((f) => f.parent_id === null)
-                .map((f) => (
-                  <button
-                    className="folder-card"
-                    key={f.id}
-                    onDoubleClick={() => setFolder(f.id)}
-                  >
-                    <Folder size={24} />
+          {view === "drive" &&
+            folders.filter((f) => f.parent_id === folder).length > 0 && (
+              <div className="folders">
+                {folders
+                  .filter((f) => f.parent_id === folder)
+                  .map((f) => (
+                    <div
+                      className="folder-card"
+                      key={f.id}
+                      onClick={() => setFolder(f.id)}
+                      style={{
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          minWidth: 0,
+                        }}
+                      >
+                        <Folder size={24} />
+                        <span
+                          style={{
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {f.name}
+                        </span>
+                      </div>
 
-                    <span>{f.name}</span>
-                  </button>
-                ))}
-            </div>
-          )}
+                      <button
+                        type="button"
+                        title="Delete folder"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          act(api.delete(`/folders/${f.id}`));
+                        }}
+                        style={{
+                          color: "#8a94a3",
+                          padding: "4px",
+                          borderRadius: "6px",
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
 
           {files.length === 0 ? (
             <div className="empty">
@@ -659,6 +751,7 @@ function App() {
                   f={file}
                   on={act}
                   onShare={() => setShare(file)}
+                  onDownload={() => downloadFile(file)}
                 />
               ))}
             </div>
@@ -670,6 +763,7 @@ function App() {
                   f={file}
                   on={act}
                   onShare={() => setShare(file)}
+                  onDownload={() => downloadFile(file)}
                 />
               ))}
             </div>
@@ -777,9 +871,14 @@ function App() {
 
           {link && (
             <div className="linkbox">
-              {window.location.origin}
-              /share/
-              {link}
+              <a
+                href={`${api.defaults.baseURL}/public/${link}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "#172033", wordBreak: "break-all" }}
+              >
+                {`${api.defaults.baseURL}/public/${link}`}
+              </a>
             </div>
           )}
         </Modal>
@@ -794,7 +893,7 @@ function App() {
    FILE CARD
 ======================================================== */
 
-function FileCard({ f, on, onShare }) {
+function FileCard({ f, on, onShare, onDownload }) {
   return (
     <div className="file-card">
       <div className="file-icon">
@@ -822,19 +921,18 @@ function FileCard({ f, on, onShare }) {
           </button>
         ) : (
           <>
-            <button onClick={onShare}>
+            <button onClick={onShare} title="Share">
               <Share2 size={16} />
             </button>
 
-            <button onClick={() => on(api.delete(`/files/${f.id}`))}>
+            <button
+              onClick={() => on(api.delete(`/files/${f.id}`))}
+              title="Move to trash"
+            >
               <Trash2 size={16} />
             </button>
 
-            <button
-              onClick={() =>
-                (window.location.href = `${api.defaults.baseURL}/files/${f.id}/download`)
-              }
-            >
+            <button onClick={onDownload} title="Download">
               <Download size={16} />
             </button>
           </>
@@ -848,7 +946,7 @@ function FileCard({ f, on, onShare }) {
    FILE ROW
 ======================================================== */
 
-function FileRow({ f, on, onShare }) {
+function FileRow({ f, on, onShare, onDownload }) {
   return (
     <div className="file-row">
       <File size={20} />
@@ -859,19 +957,18 @@ function FileRow({ f, on, onShare }) {
 
       <span>{f.mime_type}</span>
 
-      <button onClick={onShare}>
+      <button onClick={onShare} title="Share">
         <Share2 size={16} />
       </button>
 
-      <button onClick={() => on(api.delete(`/files/${f.id}`))}>
+      <button
+        onClick={() => on(api.delete(`/files/${f.id}`))}
+        title="Move to trash"
+      >
         <Trash2 size={16} />
       </button>
 
-      <button
-        onClick={() =>
-          (window.location.href = `${api.defaults.baseURL}/files/${f.id}/download`)
-        }
-      >
+      <button onClick={onDownload} title="Download">
         <Download size={16} />
       </button>
     </div>

@@ -114,11 +114,21 @@ def current_user(
     db: Session = Depends(get_db),
 ):
     """
-    Get the currently authenticated user from the
-    access_token HttpOnly cookie.
+    Get the currently authenticated user from:
+    1. HttpOnly access_token cookie
+    2. Authorization: Bearer <token> header
+    3. Query parameter ?token=<token>
     """
 
     raw_token = request.cookies.get("access_token")
+
+    if not raw_token:
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            raw_token = auth_header.split(" ", 1)[1].strip()
+
+    if not raw_token:
+        raw_token = request.query_params.get("token")
 
     if not raw_token:
         raise HTTPException(
