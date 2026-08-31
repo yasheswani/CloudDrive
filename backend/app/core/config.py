@@ -19,12 +19,16 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_DAYS: int = 14
 
     # =========================================================
-    # STORAGE
+    # STORAGE & VERCEL BLOB
     # =========================================================
 
     STORAGE_DIR: str = "./storage"
 
     MAX_UPLOAD_MB: int = 100
+
+    BLOB_READ_WRITE_TOKEN: str = ""
+    BLOB_STORE_ID: str = ""
+    BLOB_WEBHOOK_PUBLIC_KEY: str = ""
 
     # =========================================================
     # FRONTEND
@@ -43,4 +47,9 @@ class Settings(BaseSettings):
     )
 
 
+import os
+
 settings = Settings()
+
+if settings.BLOB_READ_WRITE_TOKEN and not os.environ.get("BLOB_READ_WRITE_TOKEN"):
+    os.environ["BLOB_READ_WRITE_TOKEN"] = settings.BLOB_READ_WRITE_TOKEN

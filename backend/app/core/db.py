@@ -54,7 +54,7 @@ if DATABASE_URL.startswith("sqlite"):
 else:
 
     # -----------------------------------------------------
-    # SUPABASE POSTGRESQL / VERCEL
+    # POSTGRESQL / VERCEL
     # -----------------------------------------------------
 
     engine = create_engine(

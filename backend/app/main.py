@@ -23,10 +23,13 @@ Base.metadata.create_all(bind=engine)
 # STORAGE DIRECTORY
 # ---------------------------------------------------------
 
-os.makedirs(
-    settings.STORAGE_DIR,
-    exist_ok=True,
-)
+try:
+    os.makedirs(
+        settings.STORAGE_DIR,
+        exist_ok=True,
+    )
+except OSError:
+    pass
 
 
 # ---------------------------------------------------------

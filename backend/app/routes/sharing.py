@@ -2,12 +2,12 @@ import secrets
 from datetime import datetime,timezone
 from fastapi import APIRouter,Depends,HTTPException
 from sqlalchemy.orm import Session
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from app.core.db import get_db
 from app.core.security import current_user,hash_password
 from app.models.models import File,Share,LinkShare,User
 from app.schemas.schemas import ShareCreate,LinkCreate
-from app.services.storage import path
+from app.services.storage import get_file_target, path
 router=APIRouter(tags=['sharing'])
 @router.post('/shares')
 def share(data:ShareCreate,user=Depends(current_user),db:Session=Depends(get_db)):
@@ -29,4 +29,9 @@ def public_file(token:str,db:Session=Depends(get_db)):
     l=db.query(LinkShare).filter_by(token=token).first()
     if not l or (l.expires_at and l.expires_at < datetime.now(timezone.utc)): raise HTTPException(404,'Link expired or invalid')
     f=db.get(File,l.file_id)
-    return FileResponse(path(f.storage_key),filename=f.name,media_type=f.mime_type)
+    if not f or f.deleted_at: raise HTTPException(404,'File not found')
+    target, is_url = get_file_target(f.storage_key)
+    if is_url:
+        download_url = target if "?download=" in target or "?download=1" in target else f"{target}?download=1"
+        return RedirectResponse(url=download_url, status_code=307)
+    return FileResponse(target, filename=f.name, media_type=f.mime_type)

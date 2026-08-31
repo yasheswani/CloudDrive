@@ -1,11 +1,11 @@
 from datetime import datetime,timezone
 from fastapi import APIRouter,Depends,UploadFile,File as Upload,HTTPException,Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user
 from app.models.models import File,Folder,Share,Star
-from app.services.storage import save_upload,path
+from app.services.storage import save_upload, get_file_target, remove, path
 router=APIRouter(prefix='/files',tags=['files'])
 def access(db,user,f):
     if f.owner_id==user.id: return 'owner'
@@ -27,11 +27,20 @@ async def upload(file:UploadFile=Upload(...),folder_id:int|None=Query(None),user
 def download(id:int,user=Depends(current_user),db:Session=Depends(get_db)):
     f=db.get(File,id); role=access(db,user,f) if f else None
     if not f or not role or f.deleted_at: raise HTTPException(404,'File not found')
-    return FileResponse(path(f.storage_key),filename=f.name,media_type=f.mime_type)
+    target, is_url = get_file_target(f.storage_key)
+    if is_url:
+        download_url = target if "?download=" in target or "?download=1" in target else f"{target}?download=1"
+        return RedirectResponse(url=download_url, status_code=307)
+    return FileResponse(target, filename=f.name, media_type=f.mime_type)
 @router.delete('/{id}')
-def trash(id:int,user=Depends(current_user),db:Session=Depends(get_db)):
+def trash(id:int,permanent:bool=Query(False),user=Depends(current_user),db:Session=Depends(get_db)):
     f=db.get(File,id)
     if not f or access(db,user,f) not in ('owner','editor'): raise HTTPException(404,'File not found or forbidden')
+    if permanent or f.deleted_at is not None:
+        remove(f.storage_key)
+        db.delete(f)
+        db.commit()
+        return {'ok':True,'deleted':True}
     f.deleted_at=datetime.now(timezone.utc); db.commit(); return {'ok':True}
 @router.post('/{id}/restore')
 def restore(id:int,user=Depends(current_user),db:Session=Depends(get_db)):
