@@ -1,6 +1,7 @@
 from datetime import datetime,timezone
 from fastapi import APIRouter,Depends,UploadFile,File as Upload,HTTPException,Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+import httpx
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import current_user
@@ -29,8 +30,12 @@ def download(id:int,user=Depends(current_user),db:Session=Depends(get_db)):
     if not f or not role or f.deleted_at: raise HTTPException(404,'File not found')
     target, is_url = get_file_target(f.storage_key)
     if is_url:
-        download_url = target if "?download=" in target or "?download=1" in target else f"{target}?download=1"
-        return RedirectResponse(url=download_url, status_code=307)
+        async def stream_blob():
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with client.stream("GET", target) as resp:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        yield chunk
+        return StreamingResponse(stream_blob(), media_type=f.mime_type, headers={"Content-Disposition": f'attachment; filename="{f.name}"'})
     return FileResponse(target, filename=f.name, media_type=f.mime_type)
 @router.delete('/{id}')
 def trash(id:int,permanent:bool=Query(False),user=Depends(current_user),db:Session=Depends(get_db)):
