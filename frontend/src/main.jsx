@@ -63,11 +63,15 @@ function Auth({ onLogin }) {
       }
       onLogin(response.data);
     } catch (error) {
-      const detail = error.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        setErr(detail.map((item) => item.msg).join(", "));
+      if (!error.response) {
+        setErr("Network error: Unable to connect to backend server.");
       } else {
-        setErr(detail || "Something went wrong");
+        const detail = error.response.data?.detail;
+        if (Array.isArray(detail)) {
+          setErr(detail.map((item) => item.msg || item.message).join(", "));
+        } else {
+          setErr(detail || "Authentication failed. Please check your credentials.");
+        }
       }
     } finally {
       setLoading(false);
