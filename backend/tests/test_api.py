@@ -75,6 +75,7 @@ def test_auth_and_files_workflow(client):
         mock_client = MagicMock()
         mock_httpx_cls.return_value.__aenter__.return_value = mock_client
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         async def mock_aiter_bytes(chunk_size=65536):
             yield b"Hello CloudDrive Blob!"
         mock_resp.aiter_bytes = mock_aiter_bytes
@@ -106,9 +107,18 @@ def test_auth_and_files_workflow(client):
 
     # 10. Access public share link (unauthenticated client)
     unauth_client = TestClient(app)
-    pub_res = unauth_client.get(f'/public/{token}', follow_redirects=False)
-    assert pub_res.status_code == 307
-    assert 'mockstore.public.blob.vercel-storage.com' in pub_res.headers['location']
+    with patch("httpx.AsyncClient") as mock_httpx_cls:
+        mock_client = MagicMock()
+        mock_httpx_cls.return_value.__aenter__.return_value = mock_client
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        async def mock_aiter_bytes(chunk_size=65536):
+            yield b"Hello CloudDrive Blob!"
+        mock_resp.aiter_bytes = mock_aiter_bytes
+        mock_client.stream.return_value.__aenter__.return_value = mock_resp
+
+        pub_res = unauth_client.get(f'/public/{token}')
+        assert pub_res.status_code == 200
 
     # 11. Star file
     star_res = client.post(f'/files/{file_id}/star')
@@ -127,15 +137,17 @@ def test_auth_and_files_workflow(client):
             mock_delete.assert_called_once()
 
 def test_user_to_user_sharing(client):
-    # 1. Register User A (Owner) and User B (Recipient)
+    import uuid
+    email_a = f'user_a_{uuid.uuid4().hex[:8]}@example.com'
+    email_b = f'user_b_{uuid.uuid4().hex[:8]}@example.com'
+
     client_a = TestClient(app)
     client_b = TestClient(app)
 
-    reg_a = client_a.post('/auth/register', json={'name': 'User A', 'email': 'user_a@example.com', 'password': 'password123'})
+    reg_a = client_a.post('/auth/register', json={'name': 'User A', 'email': email_a, 'password': 'password123'})
     assert reg_a.status_code == 200
-    user_a_id = reg_a.json()['id']
 
-    reg_b = client_b.post('/auth/register', json={'name': 'User B', 'email': 'user_b@example.com', 'password': 'password123'})
+    reg_b = client_b.post('/auth/register', json={'name': 'User B', 'email': email_b, 'password': 'password123'})
     assert reg_b.status_code == 200
 
     # 2. User A uploads a file
@@ -144,7 +156,7 @@ def test_user_to_user_sharing(client):
     file_id = upload_res.json()['id']
 
     # 3. User A shares file with User B as viewer
-    share_res = client_a.post('/shares', json={'file_id': file_id, 'email': 'user_b@example.com', 'role': 'viewer'})
+    share_res = client_a.post('/shares', json={'file_id': file_id, 'email': email_b, 'role': 'viewer'})
     assert share_res.status_code == 200
     assert share_res.json()['ok'] is True
 

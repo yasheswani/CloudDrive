@@ -8,7 +8,7 @@ from app.core.db import get_db
 from app.core.security import current_user
 from app.models.models import File, Folder, Share, Star, Activity
 from app.schemas.schemas import FileUpdate
-from app.services.storage import save_upload, get_file_target, remove
+from app.services.storage import save_upload, get_file_target, get_storage_response, remove
 
 router = APIRouter(prefix='/files', tags=['files'])
 
@@ -57,36 +57,20 @@ async def upload(file: UploadFile = Upload(...), folder_id: int | None = Query(N
     return {'id': f.id, 'name': f.name, 'size': size, 'mime_type': f.mime_type, 'folder_id': f.folder_id}
 
 @router.get('/{id}/download')
-def download(id: int, user = Depends(current_user), db: Session = Depends(get_db)):
+async def download(id: int, user = Depends(current_user), db: Session = Depends(get_db)):
     f = db.get(File, id)
     role = access(db, user, f) if f else None
     if not f or not role or f.deleted_at:
         raise HTTPException(404, 'File not found')
-    target, is_url = get_file_target(f.storage_key)
-    if is_url:
-        async def stream_blob():
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                async with client.stream("GET", target) as resp:
-                    async for chunk in resp.aiter_bytes(chunk_size=65536):
-                        yield chunk
-        return StreamingResponse(stream_blob(), media_type=f.mime_type, headers={"Content-Disposition": f'attachment; filename="{f.name}"'})
-    return FileResponse(target, filename=f.name, media_type=f.mime_type)
+    return await get_storage_response(f.storage_key, filename=f.name, mime_type=f.mime_type, inline=False)
 
 @router.get('/{id}/preview')
-def preview(id: int, user = Depends(current_user), db: Session = Depends(get_db)):
+async def preview(id: int, user = Depends(current_user), db: Session = Depends(get_db)):
     f = db.get(File, id)
     role = access(db, user, f) if f else None
     if not f or not role or f.deleted_at:
         raise HTTPException(404, 'File not found')
-    target, is_url = get_file_target(f.storage_key)
-    if is_url:
-        async def stream_blob():
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                async with client.stream("GET", target) as resp:
-                    async for chunk in resp.aiter_bytes(chunk_size=65536):
-                        yield chunk
-        return StreamingResponse(stream_blob(), media_type=f.mime_type, headers={"Content-Disposition": f'inline; filename="{f.name}"'})
-    return FileResponse(target, filename=f.name, media_type=f.mime_type, content_disposition_type="inline")
+    return await get_storage_response(f.storage_key, filename=f.name, mime_type=f.mime_type, inline=True)
 
 @router.patch('/{id}')
 def update_file(id: int, data: FileUpdate, user = Depends(current_user), db: Session = Depends(get_db)):

@@ -4,7 +4,9 @@ import uuid
 from pathlib import Path
 from typing import Tuple
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
+import httpx
 import vercel_blob
 from app.core.config import settings
 
@@ -50,7 +52,6 @@ async def save_upload(upload: UploadFile) -> Tuple[str, int]:
     if blob_token:
         try:
             logger.info("Uploading %s to Vercel Blob Object Storage...", key)
-            # Use multipart for large files (> 10MB)
             use_multipart = size > 10 * 1024 * 1024
             resp = vercel_blob.put(
                 path=key,
@@ -74,7 +75,7 @@ async def save_upload(upload: UploadFile) -> Tuple[str, int]:
             logger.error("Failed to upload to Vercel Blob: %s", e, exc_info=True)
             raise RuntimeError(f"Failed to upload file to Vercel Blob storage: {str(e)}") from e
 
-    # Fallback to local storage (e.g. offline dev without credentials)
+    # Fallback to local storage
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -97,6 +98,39 @@ def get_file_target(storage_key: str) -> Tuple[str, bool]:
 
     local_path = root / storage_key
     return str(local_path), False
+
+
+async def get_storage_response(storage_key: str, filename: str, mime_type: str, inline: bool = False):
+    """
+    Returns appropriate FastAPI StreamingResponse or FileResponse with fallback support.
+    """
+    disposition_type = "inline" if inline else "attachment"
+    content_disposition = f'{disposition_type}; filename="{filename}"'
+
+    target, is_url = get_file_target(storage_key)
+
+    if is_url:
+        async def stream_blob():
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as stream_client:
+                    async with stream_client.stream("GET", target) as resp:
+                        if resp.status_code == 200:
+                            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                                yield chunk
+            except Exception as e:
+                logger.error("Error streaming from Vercel Blob URL %s: %s", target, e)
+
+        return StreamingResponse(stream_blob(), media_type=mime_type, headers={"Content-Disposition": content_disposition})
+
+    # Fallback check for local storage file
+    fname_only = Path(storage_key).name
+    candidate_paths = [root / storage_key, root / fname_only]
+    for cp in candidate_paths:
+        if cp.exists() and cp.is_file():
+            return FileResponse(str(cp), filename=filename, media_type=mime_type, content_disposition_type=disposition_type)
+
+    # If neither remote blob nor local file exists, return clean error response
+    raise HTTPException(status_code=404, detail="File content not found in storage. Please re-upload this file.")
 
 
 def path(storage_key: str) -> Path:
