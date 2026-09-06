@@ -125,3 +125,38 @@ def test_auth_and_files_workflow(client):
             perm_del = client.delete(f'/files/{file_id}', params={'permanent': True})
             assert perm_del.status_code == 200
             mock_delete.assert_called_once()
+
+def test_user_to_user_sharing(client):
+    # 1. Register User A (Owner) and User B (Recipient)
+    client_a = TestClient(app)
+    client_b = TestClient(app)
+
+    reg_a = client_a.post('/auth/register', json={'name': 'User A', 'email': 'user_a@example.com', 'password': 'password123'})
+    assert reg_a.status_code == 200
+    user_a_id = reg_a.json()['id']
+
+    reg_b = client_b.post('/auth/register', json={'name': 'User B', 'email': 'user_b@example.com', 'password': 'password123'})
+    assert reg_b.status_code == 200
+
+    # 2. User A uploads a file
+    upload_res = client_a.post('/files/upload', files={'file': ('shared_doc.pdf', b'PDF Content', 'application/pdf')})
+    assert upload_res.status_code == 200
+    file_id = upload_res.json()['id']
+
+    # 3. User A shares file with User B as viewer
+    share_res = client_a.post('/shares', json={'file_id': file_id, 'email': 'user_b@example.com', 'role': 'viewer'})
+    assert share_res.status_code == 200
+    assert share_res.json()['ok'] is True
+
+    # 4. User B checks shared view
+    shared_res = client_b.get('/files', params={'view': 'shared'})
+    assert shared_res.status_code == 200
+    shared_files = shared_res.json()
+    assert len(shared_files) == 1
+    assert shared_files[0]['id'] == file_id
+    assert shared_files[0]['name'] == 'shared_doc.pdf'
+
+    # 5. User B downloads the shared file
+    dl_res = client_b.get(f'/files/{file_id}/download')
+    assert dl_res.status_code == 200
+    assert dl_res.content == b'PDF Content'
